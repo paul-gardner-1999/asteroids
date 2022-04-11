@@ -1,0 +1,37 @@
+body { background: #000; color: #fff; position: relative;}
+
+.center {
+    text-align: center;
+}
+
+/*
+ * .chrome adapted from https://codepen.io/boldfacedesign/pen/DpXjzY
+ */
+.chrome {
+    position: relative;
+    background-image: -webkit-linear-gradient(#000000 0%, #B6E8F1 46%, #ffffff 50%, #32120E 54%, #FFC488 58%, #582C11 90%, #EC9B4E 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    -webkit-text-stroke: 1px gold;
+    font-size: 150px;
+    font-family: 'Righteous', serif;
+    font-style: italic;
+    margin: 0;
+    line-height: 1;
+}
+
+.game-board {
+    transform:perspective(60rem) rotateX(25deg)  rotateY(0deg) translateZ(120px);
+    outline: #303030 2px solid;
+
+}
+.chrome.instructions {
+    font-size: 90px;
+}
+
+ul.no-bullets {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
