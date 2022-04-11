@@ -1,0 +1,41 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "DTD/xhtml1-transitional.dtd">
+<html>
+<head>
+    <title>Asteroids</title>
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css?family=Righteous">
+    <link rel="stylesheet" href="css/Asteroids.css">
+</head>
+
+<body onload="game.start()" style="font-family: Righteous">
+<div class="wrapper center" >
+    <h1 class="chrome">ASTEROIDS</h1>
+    <canvas class="game-board" id="myCanvas" align="center" width="1000px" height="800px" style="background:black;position:relative;height:800px;width:1000px;"></canvas>
+
+<h2 class="chrome instructions">INSTRUCTIONS</h2>
+<ul class="no-bullets" style="font-family: Righteous; color: white">
+    <li>A - Rotate Anticlockwise</li>
+    <li>D - Rotate Clockwise</li>
+    <li>W - Thrust</li>
+    <li>L - Fire</li>
+    <li>S - Start/Restart</li>
+</ul>
+<p>
+    This is a simple javascript demo implementing asteroids.
+    <br><br>
+</p>
+</div>
+
+<script type="text/javascript" src="/js/GraphNG.js"></script>
+<script type="text/javascript" src="/js/Asteroids.js"></script>
+<script type="text/javascript">
+    var graphNg = new GraphNG("myCanvas");
+    var game = new Asteroids(graphNg);
+</script>
+
+<hr/>
+<div id="footer">
+    Paul Gardner  - 2022
+</div>
+</body>
+</html>
