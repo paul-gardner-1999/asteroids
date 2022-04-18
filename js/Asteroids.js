@@ -65,10 +65,23 @@ class Polygon extends GameObject {
             this.graphics.drawPolyline(this.points);
         }
     }
+    /*
+     * Calculate the distance from the center of 'this' object to the x,y coordinates.
+     */
+    distanceFrom(x,y)    {
+        let square = function (x) {
+            return x * x;
+        }
+        let distance = Math.sqrt(square(this.coordinates.x - x) + square(this.coordinates.y - y));
+        return distance;
+    }
 
     pointCollision(x, y) {
         let crossed = false;
         let points = this.points;
+        if (this.distanceFrom(x,y) > this.radius) {
+            return false;
+        }
         for (let iA = 0, iB = this.points.length - 1; iA < this.points.length; iB = iA++) {
             let A = points[iA];
             let B = points[iB];
@@ -86,9 +99,6 @@ class Polygon extends GameObject {
                 crossed = !crossed;
             }
         }
-        if (crossed) {
-            console.log(`Crossed ${x},${y} : ${JSON.stringify(this.points)}`);
-        }
         return crossed;
     }
 
@@ -102,10 +112,7 @@ class Polygon extends GameObject {
     //}
 
     polygonCollision(poly) {
-        let square = function (x) {
-            return x * x;
-        }
-        if (Math.sqrt(square(this.x - poly.x) + square(this.y - poly.y)) > this.radius + poly.radius) {
+        if (this.distanceFrom(poly.coordinates.x, poly.coordinates.y) > (this.radius + poly.radius)) {
             return false;
         }
         // if Point inside polygon, then poly is either intersecting or
@@ -133,7 +140,49 @@ class Polygon extends GameObject {
     }
 }
 
-class ShootablePolygon extends Polygon {
+const STAR_COUNT = 50;
+const MAX_STAR_SIZE = 2.5;
+const STAR_STYLE = {
+    strokeStyle: "white",
+    fillStyle: "white",
+    shadowColor: 'yellow',
+    shadowBlur: 10,
+    lineWidth: 1
+};
+
+class Stars {
+    constructor(game) {
+        this.game = game;
+        this.frame = 0;
+        let width = game.graphics.width;
+        let height = game.graphics.height;
+        let stars = []
+        for(let i = 0; i < STAR_COUNT; i++) {
+            let x = width * Math.random();
+            let y = height * Math.random();
+            let radius = MAX_STAR_SIZE * Math.random();
+            let opacity = Math.random();
+            let opacityOffset = 100 * Math.random();
+            stars[i] = {
+                coordinates: {x:x,y:y},
+                radius:radius,
+                opacity: opacity,
+                opacityOffset: opacityOffset
+            };
+        }
+        this.stars = stars;
+    }
+    draw() {
+        for(let i = 0; i < STAR_COUNT; i++) {
+            let star = this.stars[i];
+            let opacity = star.opacity * Math.sin(Math.PI * ((star.opacityOffset + this.frame) % 100) / 100);
+            this.game.graphics.arcWithStyle({...STAR_STYLE, globalAlpha: opacity}, star.coordinates, star.radius, 0, 360);
+        }
+        this.frame++;
+    }
+}
+
+class DestructibleObject extends Polygon {
 
     constructor(...args) {
         super(...args);
@@ -171,7 +220,7 @@ const SHIP_RADIUS = 15;
 const THRUST_POLY = [170, 20, 180, 30, 190, 20];
 const THRUST_COLORS = ["teal", "lightblue", "green", "blue"];
 
-class Ship extends ShootablePolygon {
+class Ship extends DestructibleObject {
 
     constructor(game) {
         let width = game.graphics.width;
@@ -258,7 +307,7 @@ const UFO_RADIUS = 15;
 const UFO_ROTATION = 10;
 const UFO_VELOCITY = 2;
 const UFO_SCORE = 500;
-class Ufo extends ShootablePolygon {
+class Ufo extends DestructibleObject {
     constructor(game) {
         let width = game.graphics.width;
         let height = game.graphics.height;
@@ -276,7 +325,7 @@ class Ufo extends ShootablePolygon {
         this.rotation += UFO_ROTATION * 2 * Math.random() - UFO_ROTATION;
         this.velocity = this.calcPoint({x:0, y:0},  UFO_VELOCITY, this.rotation);
         super.move();
-        if (Math.random() > 0.995) { this.fire() };
+        if (Math.random() > 0.995) { this.fire() }
     }
 
     fire() {
@@ -324,6 +373,10 @@ class Bullet extends GameObject {
         return this.active > 0;
     }
 
+    die() {
+        this.active = 0;
+    }
+
     fire(coordinates, velocity) {
         this.coordinates = coordinates;
         this.velocity = velocity;
@@ -338,7 +391,7 @@ class Bullet extends GameObject {
 
 
     draw() {
-        if (this.active) {
+        if (this.isActive()) {
             this.graphics.arcWithStyle(BULLET_STYLE, this.coordinates,
                 2,
                 0,
@@ -366,7 +419,7 @@ const ASTEROID_STYLE = {
 };
 const ASTEROID_COLORS = ["#800000", "#008000", "#000080", "#008080", "#804000", "#808000", "#808080"];
 
-class Asteroid extends ShootablePolygon {
+class Asteroid extends DestructibleObject {
 
     constructor(game, category, coordinates, baseVelocity) {
         let config = ASTEROID_CONFIGURATIONS[category];
@@ -416,8 +469,9 @@ class Asteroids {
     constructor(graphics) {
         this.graphics = graphics;
         this.ship = null;
-        this.shootableObjects = [];
+        this.destructibleObjects = [];
         this.bulletArray = [];
+        this.stars = null;
         this.level = 1;
         this.score = 0;
         this.lives = 0;
@@ -425,6 +479,7 @@ class Asteroids {
 
     newGame() {
         this.ship = new Ship(this);
+        this.stars = new Stars(this);
         this.bulletArray = [];
         for (let i = 0; i < MAX_BULLETS; i++) {
             this.bulletArray[i] = new Bullet(this);
@@ -444,9 +499,9 @@ class Asteroids {
     nextLevel() {
         let width = this.graphics.width;
         let height = this.graphics.height;
-        this.shootableObjects = [];
+        this.destructibleObjects = [];
         for (let i = 0; i < this.level; i++) {
-            this.shootableObjects[i] = new Asteroid(this, 1,
+            this.destructibleObjects[i] = new Asteroid(this, 1,
                 {x: width * Math.random(), y: height * Math.random()},
                 {x: 0, y: 0});
         }
@@ -455,6 +510,7 @@ class Asteroids {
 
     demoMode() {
         this.ship = null;
+        this.stars = new Stars(this);
         this.bulletArray = [];
         for (let i = 0; i < MAX_BULLETS; i++) {
             this.bulletArray[i] = new Bullet(this);
@@ -465,44 +521,44 @@ class Asteroids {
 
     move() {
         this.ship?.move();
-        for (let ai in this.shootableObjects) {
-            let shootable = this.shootableObjects[ai];
-            shootable.move();
-            if (this.ship && this.ship.points.length > 0 && shootable.polygonCollision(this.ship)) {
+        for (let ai in this.destructibleObjects) {
+            let destructible = this.destructibleObjects[ai];
+            destructible.move();
+            if (this.ship && this.ship.points.length > 0 && destructible.polygonCollision(this.ship)) {
                 this.ship.explode();
             }
         }
         let cleanup = false;
-        let newShootables = [];
+        let newDestructibleObjects = [];
         for (let i in this.bulletArray) {
-            if (!this.bulletArray[i].active) {
+            if (!this.bulletArray[i].isActive()) {
                 continue;
             }
             this.bulletArray[i].move();
 
-            for (let j in this.shootableObjects) {
+            for (let j in this.destructibleObjects) {
                 if (this.ship && this.ship.pointCollision(this.bulletArray[i].coordinates.x, this.bulletArray[i].coordinates.y)) {
                     this.ship.explode();
                 }
-                if (this.shootableObjects[j].pointCollision(this.bulletArray[i].coordinates.x, this.bulletArray[i].coordinates.y)) {
-                    this.bulletArray[i].active = 0;
-                    this.shootableObjects[j].explode(newShootables);
+                if (this.destructibleObjects[j].pointCollision(this.bulletArray[i].coordinates.x, this.bulletArray[i].coordinates.y)) {
+                    this.bulletArray[i].die();
+                    this.destructibleObjects[j].explode(newDestructibleObjects);
                     cleanup = true;
                 }
             }
         }
         if (Math.random() < UFO_FREQUENCY) {
             let ufo = new Ufo(game);
-            newShootables.push(ufo);
+            newDestructibleObjects.push(ufo);
             ufo.move();
         }
 
         if (cleanup) {
-            this.shootableObjects = this.shootableObjects.filter(function (shootable, _a, _b) {
+            this.destructibleObjects = this.destructibleObjects.filter(function (shootable, _a, _b) {
                 return shootable.isActive();
             });
         }
-        this.shootableObjects.push(...newShootables);
+        this.destructibleObjects.push(...newDestructibleObjects);
         if (this.ship && !this.ship.isActive()) {
             if (--this.lives > 0) {
                 this.ship = new Ship(this);
@@ -512,7 +568,7 @@ class Asteroids {
         }
 
 
-        if (this.shootableObjects.length === 0) {
+        if (this.destructibleObjects.length === 0) {
             this.nextLevel();
         }
 
@@ -520,16 +576,16 @@ class Asteroids {
 
     draw() {
         this.graphics.clear();
+        this.stars?.draw();
         this.bulletArray.forEach(function (bullet) {
-            if (bullet.active) {
+            if (bullet.isActive()) {
                 bullet.draw();
             }
         });
-        this.shootableObjects.forEach(function (asteroid) {
+        this.destructibleObjects.forEach(function (asteroid) {
             asteroid.draw();
         });
         this.ship?.draw();
-        this.ufo?.draw();
 
         this.graphics.drawText({
                 fillStyle: "yellow",
