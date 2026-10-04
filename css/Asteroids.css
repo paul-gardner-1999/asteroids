@@ -20,10 +20,36 @@ body { background: #000; color: #fff; position: relative;}
     line-height: 1;
 }
 
-.game-board {
-    transform:perspective(60rem) rotateX(25deg)  rotateY(0deg) translateZ(120px);
-    outline: #303030 2px solid;
+.arcade-bezel {
+    display: inline-block;
+    position: relative;
+    padding: 28px;
+    border-radius: 26px;
+    background: linear-gradient(145deg, #4a4a50 0%, #1a1a1d 45%, #0a0a0b 70%, #222226 100%);
+    box-shadow:
+        inset 0 2px 3px rgba(255, 255, 255, 0.25),
+        inset 0 -10px 18px rgba(0, 0, 0, 0.75),
+        0 14px 34px rgba(0, 0, 0, 0.75),
+        0 0 46px rgba(255, 193, 90, 0.08);
+    transform: perspective(60rem) rotateX(25deg) rotateY(0deg) translateZ(120px);
+}
 
+.arcade-bezel::before {
+    content: "";
+    position: absolute;
+    inset: 12px;
+    border-radius: 14px;
+    box-shadow:
+        0 0 0 2px rgba(255, 196, 92, 0.55),
+        inset 0 0 16px rgba(0, 0, 0, 0.9);
+    pointer-events: none;
+}
+
+.game-board {
+    display: block;
+    position: relative;
+    border-radius: 6px;
+    outline: #303030 2px solid;
 }
 .chrome.instructions {
     font-size: 90px;
