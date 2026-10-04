@@ -140,6 +140,88 @@ class Polygon extends GameObject {
     }
 }
 
+// ---------------
+// Crystal lighting
+//
+// Destructible objects are rendered as flat-shaded facets (one triangle per
+// perimeter edge, fanned from the object's center). Each facet's color is
+// the object's base color dimmed to an ambient floor, then additively
+// tinted by any nearby point lights it faces toward - this is what makes
+// asteroids read as cut crystal catching the colored light of the ship's
+// thrust and gunfire, rather than a flat silhouette.
+
+function hexToRgb(hex) {
+    let value = parseInt(hex.replace('#', ''), 16);
+    return {r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255};
+}
+
+function clampChannel(value) {
+    return Math.max(0, Math.min(255, value));
+}
+
+const AMBIENT_LIGHT_ANGLE = 235;
+const AMBIENT_LIGHT_COLOR = {r: 150, g: 180, b: 255};
+const AMBIENT_LIGHT_INTENSITY = 0.45;
+const AMBIENT_FACTOR = 0.3;
+
+const THRUST_LIGHT_RADIUS = 170;
+const THRUST_LIGHT_INTENSITY = 1.5;
+const BULLET_LIGHT_RADIUS = 130;
+const BULLET_LIGHT_INTENSITY = 1.2;
+const BULLET_LIGHT_COLOR = {r: 255, g: 200, b: 60};
+
+function facetNormal(coordinates, midpoint) {
+    let nx = midpoint.x - coordinates.x;
+    let ny = midpoint.y - coordinates.y;
+    let len = Math.sqrt(nx * nx + ny * ny) || 1;
+    return {x: nx / len, y: ny / len};
+}
+
+function shadeFacetColor(baseColor, midpoint, normal, lights) {
+    let r = baseColor.r * AMBIENT_FACTOR;
+    let g = baseColor.g * AMBIENT_FACTOR;
+    let b = baseColor.b * AMBIENT_FACTOR;
+    for (const light of lights) {
+        let nx, ny, atten;
+        if (light.directional) {
+            nx = light.dx;
+            ny = light.dy;
+            atten = light.intensity;
+        } else {
+            let dx = light.x - midpoint.x;
+            let dy = light.y - midpoint.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist >= light.radius) continue;
+            nx = dx / dist;
+            ny = dy / dist;
+            atten = light.intensity * (1 - dist / light.radius);
+        }
+        let diffuse = Math.max(0, normal.x * nx + normal.y * ny) * atten;
+        if (diffuse <= 0) continue;
+        r += light.color.r * diffuse;
+        g += light.color.g * diffuse;
+        b += light.color.b * diffuse;
+    }
+    return {r: clampChannel(r), g: clampChannel(g), b: clampChannel(b)};
+}
+
+function facetSpecular(midpoint, normal, lights) {
+    let strongest = 0;
+    for (const light of lights) {
+        if (light.directional) continue;
+        let dx = light.x - midpoint.x;
+        let dy = light.y - midpoint.y;
+        let dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist >= light.radius) continue;
+        let nx = dx / dist;
+        let ny = dy / dist;
+        let dot = Math.max(0, normal.x * nx + normal.y * ny);
+        let value = Math.pow(dot, 6) * light.intensity * (1 - dist / light.radius);
+        if (value > strongest) strongest = value;
+    }
+    return Math.min(0.85, strongest);
+}
+
 const STAR_COUNT = 50;
 const MAX_STAR_SIZE = 2.5;
 const STAR_STYLE = {
@@ -198,6 +280,46 @@ class DestructibleObject extends Polygon {
         this.exploded = true;
     };
 
+    /*
+     * Additive highlight pass: tints facets facing a nearby point light
+     * (thrust flame, bullets) with that light's color, without altering
+     * the object's normal silhouette/fill.
+     */
+    drawFacetGlow() {
+        let lights = this.game.lights;
+        if (this.points.length === 0 || !lights || lights.length === 0) return;
+        let n = this.points.length;
+        for (let i = 0; i < n; i++) {
+            let A = this.points[i];
+            let B = this.points[(i + 1) % n];
+            let mid = {x: (A.x + B.x) / 2, y: (A.y + B.y) / 2};
+            let normal = facetNormal(this.coordinates, mid);
+            let r = 0, g = 0, b = 0, total = 0;
+            for (const light of lights) {
+                if (light.directional) continue;
+                let dx = light.x - mid.x;
+                let dy = light.y - mid.y;
+                let dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist >= light.radius) continue;
+                let nx = dx / dist;
+                let ny = dy / dist;
+                let w = Math.max(0, normal.x * nx + normal.y * ny) * light.intensity * (1 - dist / light.radius);
+                if (w <= 0) continue;
+                total += w;
+                r += light.color.r * w;
+                g += light.color.g * w;
+                b += light.color.b * w;
+            }
+            if (total <= 0.03) continue;
+            let alpha = Math.min(0.6, total * 0.5);
+            this.graphics.polyfill({
+                fillStyle: `rgba(${Math.round(clampChannel(r))},${Math.round(clampChannel(g))},${Math.round(clampChannel(b))},${alpha})`,
+                strokeStyle: "rgba(0,0,0,0)",
+                lineWidth: 0,
+                globalCompositeOperation: "lighter"
+            }, [this.coordinates, A, B]);
+        }
+    }
 
 }
 
@@ -218,7 +340,7 @@ const SHIP_POLY = [
     210, 15];
 const SHIP_RADIUS = 15;
 const THRUST_POLY = [170, 20, 180, 30, 190, 20];
-const THRUST_COLORS = ["teal", "lightblue", "green", "blue"];
+const THRUST_COLORS = ["#00CFCF", "#8FD9FF", "#39FF88", "#3C7BFF"];
 
 class Ship extends DestructibleObject {
 
@@ -246,9 +368,8 @@ class Ship extends DestructibleObject {
                 let distance = THRUST_POLY[i * 2 + 1];
                 points[i] = this.calcPoint(this.coordinates, distance, angle);
             }
-            let color = THRUST_COLORS[Math.floor(Math.random() * THRUST_POLY.length)];
             this.graphics.drawPolylineWithStyle({
-                    strokeStyle: color,
+                    strokeStyle: this.thrustColor,
                     lineWidth: 2,
                     shadowColor: "#DDDDFF",
                     shadowBlur: 10
@@ -256,11 +377,13 @@ class Ship extends DestructibleObject {
                 },
                 points);
         }
+        this.drawFacetGlow();
     };
 
 
     move() {
         this.angle += this.rotation;
+        this.thrustColor = THRUST_COLORS[Math.floor(Math.random() * THRUST_COLORS.length)];
         if (this.thrust) {
             this.velocity = this.calcPoint(this.velocity, 0.3, this.angle);
         }
@@ -326,6 +449,11 @@ class Ufo extends DestructibleObject {
         this.velocity = this.calcPoint({x:0, y:0},  UFO_VELOCITY, this.rotation);
         super.move();
         if (Math.random() > 0.995) { this.fire() }
+    }
+
+    draw() {
+        super.draw();
+        this.drawFacetGlow();
     }
 
     fire() {
@@ -415,9 +543,9 @@ const ASTEROID_STYLE = {
     strokeStyle: "#808080",
     lineWidth: 1,
     fillStyle: "#505050",
-    globalAlpha: 0.5
+    globalAlpha: 0.88
 };
-const ASTEROID_COLORS = ["#800000", "#008000", "#000080", "#008080", "#804000", "#808000", "#808080"];
+const ASTEROID_COLORS = ["#8E2DE2", "#00C9A7", "#2979FF", "#FF3D68", "#FFC400", "#00E5FF", "#C724B1"];
 
 class Asteroid extends DestructibleObject {
 
@@ -425,12 +553,15 @@ class Asteroid extends DestructibleObject {
         let config = ASTEROID_CONFIGURATIONS[category];
         let radius = config.radius;
         let poly = []
+        let step = 360 / config.complexity;
         for (let i = 0; i < config.complexity; i++) {
-            poly[i * 2] = 360 * i / config.complexity;
-            poly[i * 2 + 1] = radius - Math.random() * radius * 0.4;
+            let jitter = (Math.random() - 0.5) * step * 0.7;
+            poly[i * 2] = step * i + jitter;
+            poly[i * 2 + 1] = radius - Math.random() * radius * 0.5;
         }
         let style = {...ASTEROID_STYLE, fillStyle: ASTEROID_COLORS[Math.floor(Math.random() * ASTEROID_COLORS.length)]};
         super(game, poly, style, {...coordinates}, baseVelocity, radius);
+        this.baseColor = hexToRgb(style.fillStyle);
         // adjust velocity to account for explosion.
         let explodeDegrees = 360 * Math.random();
         this.velocity = this.calcPoint(this.velocity, config.velocity, explodeDegrees);
@@ -444,6 +575,49 @@ class Asteroid extends DestructibleObject {
         this.angle += this.rotation;
         super.move();
     };
+
+    /*
+     * Renders the asteroid as flat-shaded crystal facets (one triangle per
+     * perimeter edge, fanned from the center) instead of a single flat
+     * fill, so each face can catch light independently.
+     */
+    draw() {
+        if (this.points.length === 0) return;
+        let lights = this.game.lights || [];
+        let n = this.points.length;
+        let alpha = this.style.globalAlpha ?? 0.88;
+        for (let i = 0; i < n; i++) {
+            let A = this.points[i];
+            let B = this.points[(i + 1) % n];
+            let mid = {x: (A.x + B.x) / 2, y: (A.y + B.y) / 2};
+            let normal = facetNormal(this.coordinates, mid);
+            let shaded = shadeFacetColor(this.baseColor, mid, normal, lights);
+            this.graphics.polyfill({
+                fillStyle: `rgba(${Math.round(shaded.r)},${Math.round(shaded.g)},${Math.round(shaded.b)},${alpha})`,
+                strokeStyle: "rgba(0,0,0,0)",
+                lineWidth: 0
+            }, [this.coordinates, A, B]);
+
+            let spark = facetSpecular(mid, normal, lights);
+            if (spark > 0.03) {
+                this.graphics.polyfill({
+                    fillStyle: `rgba(255,255,255,${spark})`,
+                    strokeStyle: "rgba(0,0,0,0)",
+                    lineWidth: 0,
+                    globalCompositeOperation: "lighter"
+                }, [this.coordinates, A, B]);
+            }
+        }
+
+        // Single outline around the true perimeter only - the facet fills
+        // above are deliberately unstroked so no spokes radiate from the
+        // center (that read as umbrella ribs rather than a rock edge).
+        let edge = {r: this.baseColor.r * 0.35, g: this.baseColor.g * 0.35, b: this.baseColor.b * 0.35};
+        this.graphics.drawPolylineWithStyle({
+            strokeStyle: `rgba(${Math.round(edge.r)},${Math.round(edge.g)},${Math.round(edge.b)},0.9)`,
+            lineWidth: 1.5
+        }, this.points);
+    }
 
 
     explode(asteroidList) {
@@ -574,7 +748,45 @@ class Asteroids {
 
     }
 
+    /*
+     * Builds this frame's light sources: a fixed dim ambient light (so
+     * facets are never fully black) plus the ship's thrust flame and any
+     * in-flight bullets, which asteroids/ship/UFO facets react to in draw().
+     */
+    computeLights() {
+        let angleRad = Math.PI * AMBIENT_LIGHT_ANGLE / 180;
+        let lights = [{
+            directional: true,
+            dx: Math.cos(angleRad),
+            dy: Math.sin(angleRad),
+            color: AMBIENT_LIGHT_COLOR,
+            intensity: AMBIENT_LIGHT_INTENSITY
+        }];
+        if (this.ship && this.ship.isActive() && this.ship.thrust) {
+            let flame = this.ship.calcPoint(this.ship.coordinates, 25, this.ship.angle + 180);
+            lights.push({
+                x: flame.x,
+                y: flame.y,
+                color: hexToRgb(this.ship.thrustColor),
+                intensity: THRUST_LIGHT_INTENSITY,
+                radius: THRUST_LIGHT_RADIUS
+            });
+        }
+        for (const bullet of this.bulletArray) {
+            if (!bullet.isActive()) continue;
+            lights.push({
+                x: bullet.coordinates.x,
+                y: bullet.coordinates.y,
+                color: BULLET_LIGHT_COLOR,
+                intensity: BULLET_LIGHT_INTENSITY * Math.min(1, bullet.active / 10),
+                radius: BULLET_LIGHT_RADIUS
+            });
+        }
+        this.lights = lights;
+    }
+
     draw() {
+        this.computeLights();
         this.graphics.clear();
         this.stars?.draw();
         this.bulletArray.forEach(function (bullet) {
