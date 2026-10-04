@@ -1,5 +1,7 @@
 # asteroids
 
+Play it here: https://paul-gardner-1999.github.io/asteroids/
+
 ![Game Image](./screenshot.png)
 
 Simple game of asteroids written to help better understand using the canvas widget.
