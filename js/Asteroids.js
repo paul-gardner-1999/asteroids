@@ -264,6 +264,101 @@ class Stars {
     }
 }
 
+// ---------------
+// Explosion
+//
+// Purely decorative: the exploding object's outline is cut into one
+// shard per edge, each tumbling away from the object's center. Shards
+// take no part in any collision check, so once an object has exploded it
+// can no longer affect other objects even while its shards are still
+// animating.
+
+const EXPLOSION_MIN_LIFE = 50;  // ~1s at the game's 20ms frame interval
+const EXPLOSION_MAX_LIFE = 100; // ~2s
+const EXPLOSION_BURST_SPEED_MIN = 0.6;
+const EXPLOSION_BURST_SPEED_MAX = 2.8;
+const EXPLOSION_ROTATION_SPEED = 14;
+
+class Explosion {
+    constructor(game, points, coordinates, velocity, color) {
+        this.game = game;
+        this.color = color;
+        this.alive = true;
+        this.shards = [];
+        let n = points.length;
+        for (let i = 0; i < n; i++) {
+            let A = points[i];
+            let B = points[(i + 1) % n];
+            let mid = {x: (A.x + B.x) / 2, y: (A.y + B.y) / 2};
+            let outward = facetNormal(coordinates, mid);
+            let burst = EXPLOSION_BURST_SPEED_MIN + Math.random() * (EXPLOSION_BURST_SPEED_MAX - EXPLOSION_BURST_SPEED_MIN);
+            let life = EXPLOSION_MIN_LIFE + Math.floor(Math.random() * (EXPLOSION_MAX_LIFE - EXPLOSION_MIN_LIFE));
+            this.shards.push({
+                localA: {x: A.x - mid.x, y: A.y - mid.y},
+                localB: {x: B.x - mid.x, y: B.y - mid.y},
+                center: {x: mid.x, y: mid.y},
+                // Shards keep the velocity the object was already travelling
+                // at, plus an outward burst so the outline visibly separates.
+                velocity: {
+                    x: velocity.x + outward.x * burst,
+                    y: velocity.y + outward.y * burst
+                },
+                angle: 0,
+                rotationSpeed: (Math.random() - 0.5) * 2 * EXPLOSION_ROTATION_SPEED,
+                life: life,
+                maxLife: life
+            });
+        }
+    }
+
+    isActive() {
+        return this.alive;
+    }
+
+    move() {
+        let width = this.game.graphics.width;
+        let height = this.game.graphics.height;
+        let alive = false;
+        for (const shard of this.shards) {
+            if (shard.life <= 0) continue;
+            shard.center.x += shard.velocity.x;
+            if (shard.center.x < 0) shard.center.x += width;
+            else if (shard.center.x > width) shard.center.x -= width;
+            shard.center.y += shard.velocity.y;
+            if (shard.center.y < 0) shard.center.y += height;
+            else if (shard.center.y > height) shard.center.y -= height;
+            shard.angle += shard.rotationSpeed;
+            shard.life--;
+            if (shard.life > 0) alive = true;
+        }
+        this.alive = alive;
+    }
+
+    draw() {
+        for (const shard of this.shards) {
+            if (shard.life <= 0) continue;
+            let alpha = shard.life / shard.maxLife;
+            let rad = Math.PI * shard.angle / 180;
+            let cos = Math.cos(rad);
+            let sin = Math.sin(rad);
+            let A = {
+                x: shard.center.x + shard.localA.x * cos - shard.localA.y * sin,
+                y: shard.center.y + shard.localA.x * sin + shard.localA.y * cos
+            };
+            let B = {
+                x: shard.center.x + shard.localB.x * cos - shard.localB.y * sin,
+                y: shard.center.y + shard.localB.x * sin + shard.localB.y * cos
+            };
+            this.game.graphics.drawPolylineWithStyle({
+                strokeStyle: `rgba(${this.color.r},${this.color.g},${this.color.b},${alpha})`,
+                lineWidth: 1.5,
+                shadowColor: `rgba(${this.color.r},${this.color.g},${this.color.b},${alpha})`,
+                shadowBlur: 6
+            }, [A, B]);
+        }
+    }
+}
+
 class DestructibleObject extends Polygon {
 
     constructor(...args) {
@@ -276,8 +371,21 @@ class DestructibleObject extends Polygon {
         return !this.exploded;
     }
 
+    /*
+     * Marks the object dead (it's already excluded from every collision
+     * check once isActive() is false, and gets dropped from its owning
+     * array the same frame) and spawns a purely decorative Explosion in
+     * its place - the explosion never takes part in collisions.
+     */
     explode(newShootables) {
+        if (this.exploded) {
+            return;
+        }
         this.exploded = true;
+        if (this.points.length > 0) {
+            let color = this.baseColor || hexToRgb(this.style.fillStyle);
+            this.game.explosions.push(new Explosion(this.game, this.points, this.coordinates, this.velocity, color));
+        }
     };
 
     /*
@@ -330,7 +438,7 @@ class DestructibleObject extends Polygon {
 const SHIP_STYLE = {
     strokeStyle: "white",
     lineWidth: 1,
-    fillStyle: "teal",
+    fillStyle: "#008080",
     globalAlpha: 0.5
 };
 const SHIP_POLY = [
@@ -645,6 +753,7 @@ class Asteroids {
         this.ship = null;
         this.destructibleObjects = [];
         this.bulletArray = [];
+        this.explosions = [];
         this.stars = null;
         this.level = 1;
         this.score = 0;
@@ -655,6 +764,7 @@ class Asteroids {
         this.ship = new Ship(this);
         this.stars = new Stars(this);
         this.bulletArray = [];
+        this.explosions = [];
         for (let i = 0; i < MAX_BULLETS; i++) {
             this.bulletArray[i] = new Bullet(this);
         }
@@ -683,6 +793,8 @@ class Asteroids {
     }
 
     demoMode() {
+        // explosions (e.g. the ship's own death burst, happening this same
+        // frame) are left alone so they can keep animating into demo mode
         this.ship = null;
         this.stars = new Stars(this);
         this.bulletArray = [];
@@ -746,6 +858,8 @@ class Asteroids {
             this.nextLevel();
         }
 
+        this.explosions.forEach(explosion => explosion.move());
+        this.explosions = this.explosions.filter(explosion => explosion.isActive());
     }
 
     /*
@@ -798,6 +912,7 @@ class Asteroids {
             asteroid.draw();
         });
         this.ship?.draw();
+        this.explosions.forEach(explosion => explosion.draw());
 
         this.graphics.drawText({
                 fillStyle: "yellow",
